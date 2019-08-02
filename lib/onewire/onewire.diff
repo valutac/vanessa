@@ -1,0 +1,213 @@
+diff --git a/drivers/onewire/ds18x20.py b/drivers/onewire/ds18x20.py
+index a2f7f5c..c8baa9e 100644
+--- a/drivers/onewire/ds18x20.py
++++ b/drivers/onewire/ds18x20.py
+@@ -96,3 +96,7 @@ class DS18X20(object):
+             return (temp_msb << 8 | temp_lsb) / 16
+         else:
+             assert False
++
++# import ds18x20, machine
++# temp = ds18x20.DS18X20(machine.Pin('G22',machine.Pin.OPEN_DRAIN, machine.Pin.PULL_UP))
++# temp.read_temp()
+diff --git a/drivers/onewire/onewire.py b/drivers/onewire/onewire.py
+index ffeb130..9b3548b 100644
+--- a/drivers/onewire/onewire.py
++++ b/drivers/onewire/onewire.py
+@@ -44,9 +44,9 @@ think much of that remains.  In any event that was..
+     (copyleft) 2006 by Derek Yerger - Free to distribute freely.
+ """
+ 
+-import pyb
+-from pyb import disable_irq
+-from pyb import enable_irq
++import time
++from time import sleep_us as udelay
++from machine import enable_irq, disable_irq
+ 
+ class OneWire:
+     def __init__(self, pin):
+@@ -60,9 +60,10 @@ class OneWire:
+ 
+         # cache a bunch of methods and attributes.  This is necessary in _write_bit and 
+         # _read_bit to achieve the timing required by the OneWire protocol.
+-        self.cache = (pin.init, pin.value, pin.OUT_PP, pin.IN, pin.PULL_NONE)
++        self.cache = (pin.init, pin.value, pin.OUT, pin.IN, None)
+ 
+-        pin.init(pin.IN, pin.PULL_UP)
++        pin.init(pin.OPEN_DRAIN, pin.PULL_UP)
++        pin.value(1)
+ 
+     def reset(self):
+         """
+@@ -73,7 +74,8 @@ class OneWire:
+         power and ground to your devices.
+         """
+         retries = 25
+-        self.data_pin.init(self.data_pin.IN, self.data_pin.PULL_UP)
++        #self.data_pin.init(self.data_pin.IN, self.data_pin.PULL_UP)
++        self.data_pin.value(1)
+ 
+         # We will wait up to 250uS for
+         # the bus to come high, if it doesn't then it is broken or shorted
+@@ -86,41 +88,42 @@ class OneWire:
+             retries -= 1
+             if retries == 0:
+                 raise OSError("OneWire pin didn't go high")
+-            pyb.udelay(10)
++            udelay(10)
+ 
+         #  pull the bus low for at least 480us
+-        self.data_pin.low()
+-        self.data_pin.init(self.data_pin.OUT_PP)
+-        pyb.udelay(480)
++        self.data_pin.value(0)
++        #self.data_pin.init(self.data_pin.OUT)
++        udelay(480)
+ 
+         # If there is a slave present, it should pull the bus low within 60us
+-        i = pyb.disable_irq()
+-        self.data_pin.init(self.data_pin.IN, self.data_pin.PULL_UP)
+-        pyb.udelay(70)
++        i = disable_irq()
++        #self.data_pin.init(self.data_pin.IN, self.data_pin.PULL_UP)
++        self.data_pin.value(1)
++        udelay(70)
+         presence = not self.data_pin.value()
+-        pyb.enable_irq(i)
+-        pyb.udelay(410)
++        enable_irq(i)
++        udelay(410)
+         return presence
+ 
+     def write_bit(self, value):
+         """
+         Write a single bit.
+         """
+-        pin_init, pin_value, Pin_OUT_PP, Pin_IN, Pin_PULL_UP = self.cache
+-        self._write_bit(value, pin_init, pin_value, Pin_OUT_PP)
++        pin_init, pin_value, Pin_OUT, Pin_IN, Pin_PULL_UP = self.cache
++        self._write_bit(value, pin_init, pin_value, Pin_OUT)
+ 
+-    def _write_bit(self, value, pin_init, pin_value, Pin_OUT_PP):
++    def _write_bit(self, value, pin_init, pin_value, Pin_OUT):
+         """
+         Write a single bit - requires cached methods/attributes be passed as arguments.
+         See also write_bit()
+         """
+         d0, d1, d2, d3 = self.write_delays
+-        udelay = pyb.udelay
++        udelay = time.sleep_us
+         if value:
+             # write 1
+             i = disable_irq()
+             pin_value(0)
+-            pin_init(Pin_OUT_PP)
++            #pin_init(Pin_OUT)
+             udelay(d0)
+             pin_value(1)
+             enable_irq(i)
+@@ -129,7 +132,7 @@ class OneWire:
+             # write 0
+             i = disable_irq()
+             pin_value(0)
+-            pin_init(Pin_OUT_PP)
++            #pin_init(Pin_OUT)
+             udelay(d2)
+             pin_value(1)
+             enable_irq(i)
+@@ -140,11 +143,12 @@ class OneWire:
+         Write a byte.  The pin will go tri-state at the end of the write to avoid
+         heating in a short or other mishap.
+         """
+-        pin_init, pin_value, Pin_OUT_PP, Pin_IN, Pin_PULL_UP = self.cache
++        pin_init, pin_value, Pin_OUT, Pin_IN, Pin_PULL_UP = self.cache
+         for i in range(8):
+-            self._write_bit(value & 1, pin_init, pin_value, Pin_OUT_PP)
++            self._write_bit(value & 1, pin_init, pin_value, Pin_OUT)
+             value >>= 1
+-        pin_init(Pin_IN, Pin_PULL_UP)
++        #pin_init(Pin_IN, Pin_PULL_UP)
++        pin_value(1)
+ 
+     def write_bytes(self, bytestring):
+         """
+@@ -153,19 +157,21 @@ class OneWire:
+         for byte in bytestring:
+             self.write_byte(byte)
+ 
+-    def _read_bit(self, pin_init, pin_value, Pin_OUT_PP, Pin_IN, Pin_PULL_UP):
++    def _read_bit(self, pin_init, pin_value, Pin_OUT, Pin_IN, Pin_PULL_UP):
+         """
+         Read a single bit - requires cached methods/attributes be passed as arguments.
+         See also read_bit()
+         """
+         d0, d1, d2 = self.read_delays
+-        udelay = pyb.udelay
+-        pin_init(Pin_IN, Pin_PULL_UP) # TODO why do we need this?
++        udelay = time.sleep_us
++        pin_value(1)
++        #pin_init(Pin_IN, Pin_PULL_UP) # TODO why do we need this?
+         i = disable_irq()
+         pin_value(0)
+-        pin_init(Pin_OUT_PP)
++        #pin_init(Pin_OUT)
+         udelay(d0)
+-        pin_init(Pin_IN, Pin_PULL_UP)
++        pin_value(1)
++        #pin_init(Pin_IN, Pin_PULL_UP)
+         udelay(d1)
+         value = pin_value()
+         enable_irq(i)
+@@ -176,18 +182,18 @@ class OneWire:
+         """
+         Read a single bit.
+         """
+-        pin_init, pin_value, Pin_OUT_PP, Pin_IN, Pin_PULL_UP = self.cache
+-        return self._read_bit(pin_init, pin_value, Pin_OUT_PP, Pin_IN, Pin_PULL_UP)
++        pin_init, pin_value, Pin_OUT, Pin_IN, Pin_PULL_UP = self.cache
++        return self._read_bit(pin_init, pin_value, Pin_OUT, Pin_IN, Pin_PULL_UP)
+ 
+     def read_byte(self):
+         """
+         Read a single byte and return the value as an integer.
+         See also read_bytes()
+         """
+-        pin_init, pin_value, Pin_OUT_PP, Pin_IN, Pin_PULL_UP = self.cache
++        pin_init, pin_value, Pin_OUT, Pin_IN, Pin_PULL_UP = self.cache
+         value = 0
+         for i in range(8):
+-            bit = self._read_bit(pin_init, pin_value, Pin_OUT_PP, Pin_IN, Pin_PULL_UP)
++            bit = self._read_bit(pin_init, pin_value, Pin_OUT, Pin_IN, Pin_PULL_UP)
+             value |= bit << i
+         return value
+ 
+@@ -227,7 +233,7 @@ class OneWire:
+         self.write_byte(0xCC)   # SKIP ROM
+ 
+     def depower(self):
+-        self.data_pin.init(self.data_pin.IN, self.data_pin.PULL_NONE)
++        self.data_pin.init(self.data_pin.IN, pull=None)
+ 
+     def scan(self):
+         """
+@@ -255,7 +261,7 @@ class OneWire:
+         rom_byte_number = 0
+         rom_byte_mask = 1
+         search_result = 0
+-        pin_init, pin_value, Pin_OUT_PP, Pin_IN, Pin_PULL_UP = self.cache
++        pin_init, pin_value, Pin_OUT, Pin_IN, Pin_PULL_UP = self.cache
+ 
+         # if the last call was not the last one
+         if not self.last_device_flag:
+@@ -270,8 +276,8 @@ class OneWire:
+             # loop to do the search
+             while rom_byte_number < 8:  # loop until through all ROM bytes 0-7
+                 # read a bit and its complement
+-                id_bit = self._read_bit(pin_init, pin_value, Pin_OUT_PP, Pin_IN, Pin_PULL_UP)
+-                cmp_id_bit = self._read_bit(pin_init, pin_value, Pin_OUT_PP, Pin_IN, Pin_PULL_UP)
++                id_bit = self._read_bit(pin_init, pin_value, Pin_OUT, Pin_IN, Pin_PULL_UP)
++                cmp_id_bit = self._read_bit(pin_init, pin_value, Pin_OUT, Pin_IN, Pin_PULL_UP)
+ 
+                 # check for no devices on 1-wire
+                 if (id_bit == 1) and (cmp_id_bit == 1):
